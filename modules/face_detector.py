@@ -159,7 +159,7 @@ class FaceDetector:
         faces = self.detect(frame)
         return self.get_face_data(faces)
 if __name__ == "__main__":
-    from camera import Camera
+    from modules.camera import Camera
 
     detector = FaceDetector()
 
