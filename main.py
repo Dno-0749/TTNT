@@ -1,97 +1,257 @@
 import cv2
-from camera import Camera
-from face_detector import FaceDetector
+import time
+
+from camera.camera_manager import CameraManager
+from camera.video_recorder import VideoRecorder
+from camera.screenshot import ScreenshotManager
+
+from detection.face_detector import FaceDetector
+from detection.face_tracker import FaceTracker
+
+from processing.frame_processor import FrameProcessor
+
+from utils.logger import setup_logger
+
+from config.config import (
+    CAMERA_INDEX,
+    FRAME_WIDTH,
+    FRAME_HEIGHT,
+    CAMERA_FPS,
+    WINDOW_NAME,
+    SCREENSHOT_FOLDER,
+    RECORDING_FOLDER,
+    KEY_QUIT,
+    KEY_SCREENSHOT,
+    KEY_RECORD,
+    KEY_FLIP,
+    KEY_DETECTION
+)
 def main():
+
+    logger = setup_logger()
+
     camera = None
+    recorder = None
+
     try:
-        camera = Camera(
-            camera_index=0,
-            width=640,
-            height=480
+
+        logger.info("Starting camera...")
+
+        camera = CameraManager(
+            camera_index=CAMERA_INDEX,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT
         )
 
-        print("Camera đã được khởi động.")
-        face_detector = FaceDetector()
-        print("Face Detector đã được khởi động.")
-        print("Nhấn Q để thoát.")
-        print("-" * 50)
+        logger.info("Camera started successfully.")
+        detector = FaceDetector()
+
+        logger.info(
+            "Face detector started successfully."
+        )
+        tracker = FaceTracker()
+
+        logger.info(
+            "Face tracker started successfully."
+        )
+        screenshot_manager = ScreenshotManager(
+            SCREENSHOT_FOLDER
+        )
+        recorder = VideoRecorder(
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            fps=CAMERA_FPS,
+            folder=RECORDING_FOLDER
+        )
+        processor = FrameProcessor()
+        flip_enabled = True
+
+        detection_enabled = True
+        previous_time = time.time()
+
+        fps = 0
+
+        logger.info("Application started.")
         while True:
-            frame = camera.get_frame()
+
+            frame = camera.get_frame(
+                flip_enabled=flip_enabled
+            )
+
             if frame is None:
-                print("Không thể đọc frame từ camera.")
+
+                logger.error(
+                    "Cannot read frame."
+                )
+
                 break
-            faces = face_detector.detect(frame)
-            face_count = face_detector.count_faces(faces)
-            face_data = face_detector.get_face_data(faces)
+            current_time = time.time()
 
-            frame = face_detector.draw_faces(
-                frame,
-                faces
+            elapsed_time = (
+                current_time - previous_time
             )
-            cv2.putText(
-                frame,
-                f"Faces: {face_count}",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
-            )
-            if face_count == 0:
 
-                status = "No face detected"
+            if elapsed_time > 0:
 
-            elif face_count == 1:
+                fps = 1 / elapsed_time
 
-                status = "1 face detected"
+            previous_time = current_time
+            face_data = {
+                "face_count": 0,
+                "faces": []
+            }
+
+            if detection_enabled:
+
+                faces = detector.detect(frame)
+                frame = detector.draw_faces(
+                    frame,
+                    faces
+                )
+
+                face_data = detector.get_face_data(
+                    faces
+                )
+                tracked_faces = tracker.update(
+                    face_data["faces"]
+                )
+
+                face_data["faces"] = (
+                    tracked_faces
+                )
+
+                face_data["face_count"] = (
+                    len(tracked_faces)
+                )
+                for face in tracked_faces:
+
+                    x = face["x"]
+                    y = face["y"]
+
+                    face_id = face["id"]
+
+                    cv2.putText(
+                        frame,
+                        f"ID: {face_id}",
+                        (x, y + face["height"] + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 0, 0),
+                        2
+                    )
 
             else:
 
-                status = f"{face_count} faces detected"
+                tracker.reset()
+            frame = processor.draw_info(
+                frame=frame,
+                face_count=face_data["face_count"],
+                fps=fps,
+                detection_enabled=detection_enabled,
+                flip_enabled=flip_enabled,
+                recording=recorder.is_recording
+            )
+            if recorder.is_recording:
 
-            cv2.putText(
-                frame,
-                status,
-                (20, 75),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2
-            )
-            cv2.putText(
-                frame,
-                "Press Q to quit",
-                (20, 110),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2
-            )
+                recorder.write(frame)
             cv2.imshow(
-                "Camera + Face Detection",
+                WINDOW_NAME,
                 frame
             )
-            print(
-                f"Face count: {face_data['face_count']} | "
-                f"Faces: {face_data['faces']}"
-            )
             key = cv2.waitKey(1) & 0xFF
+            if key == KEY_QUIT:
 
-            if key == ord("q"):
-                print("Đang thoát chương trình...")
+                logger.info(
+                    "Quit requested."
+                )
+
                 break
+            elif key == KEY_SCREENSHOT:
+
+                filepath = (
+                    screenshot_manager.save(
+                        frame
+                    )
+                )
+
+                if filepath:
+
+                    logger.info(
+                        f"Screenshot saved: "
+                        f"{filepath}"
+                    )
+            elif key == KEY_RECORD:
+
+                try:
+
+                    recording = (
+                        recorder.toggle()
+                    )
+
+                    if recording:
+
+                        logger.info(
+                            "Recording started."
+                        )
+
+                    else:
+
+                        logger.info(
+                            "Recording stopped."
+                        )
+
+                except RuntimeError as error:
+
+                    logger.error(
+                        f"Recording error: {error}"
+                    )
+            elif key == KEY_FLIP:
+
+                flip_enabled = not flip_enabled
+
+                logger.info(
+                    f"Flip: {flip_enabled}"
+                )
+
+            elif key == KEY_DETECTION:
+
+                detection_enabled = (
+                    not detection_enabled
+                )
+
+                logger.info(
+                    f"Face detection: "
+                    f"{detection_enabled}"
+                )
     except RuntimeError as error:
-        print(f"Lỗi: {error}")
+
+        logger.error(
+            f"Application error: {error}"
+        )
+
     except KeyboardInterrupt:
-        print("\nChương trình bị dừng bởi người dùng.")
+
+        logger.info(
+            "Application interrupted."
+        )
 
     finally:
+
+        if recorder is not None:
+
+            recorder.release()
+
         if camera is not None:
+
             camera.release()
+
         cv2.destroyAllWindows()
-        print("Camera đã được giải phóng.")
-        print("Chương trình kết thúc.")
+
+        logger.info(
+            "Application closed."
+        )
 
 
 if __name__ == "__main__":
+
     main()

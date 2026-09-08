@@ -1,0 +1,25 @@
+CAMERA_INDEX = 0
+
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
+
+CAMERA_FPS = 30
+FACE_SCALE_FACTOR = 1.1
+
+FACE_MIN_NEIGHBORS = 5
+
+FACE_MIN_SIZE = (30, 30)
+WINDOW_NAME = "AI Camera - Face Detection"
+
+SCREENSHOT_FOLDER = "captures"
+
+RECORDING_FOLDER = "recordings"
+KEY_QUIT = ord("q")
+
+KEY_SCREENSHOT = ord("s")
+
+KEY_RECORD = ord("r")
+
+KEY_FLIP = ord("f")
+
+KEY_DETECTION = ord("d")
