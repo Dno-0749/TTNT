@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Môi trường ảo Python
+venv/
+.venv/
+env/
+
+# File tạm của VS Code
+.vscode/
+
+# File hệ thống
+.DS_Store
+Thumbs.db
