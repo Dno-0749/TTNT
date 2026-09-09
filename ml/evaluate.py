@@ -1,9 +1,17 @@
+import sys
 import os
 import joblib
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 def evaluate():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,8 +30,14 @@ def evaluate():
     model = joblib.load(model_path)
     y_pred = model.predict(X)
 
-    # Vẽ Confusion Matrix
+    # In báo cáo chi tiết
     labels = sorted(list(set(y_true)))
+    print("\n" + "="*60)
+    print(" BÁO CÁO ĐÁNH GIÁ CHI TIẾT (CLASSIFICATION REPORT)")
+    print("="*60)
+    print(classification_report(y_true, y_pred, labels=labels))
+
+    # Vẽ Confusion Matrix
     cm = confusion_matrix(y_true, y_pred, labels=labels)
 
     plt.figure(figsize=(8, 6))
@@ -37,7 +51,7 @@ def evaluate():
     output_img = os.path.join(base_dir, "models", "confusion_matrix.png")
     plt.savefig(output_img)
     print(f"📊 Đã lưu biểu đồ đánh giá tại: {output_img}")
-    plt.show()
+    plt.close()
 
 if __name__ == "__main__":
     evaluate()

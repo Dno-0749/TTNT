@@ -19,6 +19,10 @@ class FocusEngine:
         self.distracted_start_time = None
         self.current_state = "FOCUSED"
 
+    def reset(self):
+        self.distracted_start_time = None
+        self.current_state = "FOCUSED"
+
     def predict_state(self, face_count, ear, blink_count, closure_duration, yaw, pitch=0.0, roll=0.0):
         if self.model is None:
             return "UNKNOWN"
@@ -34,32 +38,62 @@ class FocusEngine:
     def calculate_score(self, eye_data, head_yaw, face_count, ml_state):
         now = time()
         
-        # Phân tích theo thời gian (Temporal Analysis)
-        is_raw_distracted = (abs(head_yaw) > 25.0) or (ml_state in ["Distracted", "Sleepy", "Absent"])
+        # 1. Trường hợp vắng mặt
+        if face_count == 0:
+            self.distracted_start_time = None
+            self.current_state = "ABSENT"
+            return 0.0, "ABSENT"
 
-        if is_raw_distracted:
+        is_sleepy = eye_data.get("is_sleepy", False) or (ml_state == "Sleepy")
+        is_raw_distracted = (abs(head_yaw) > 20.0) or (ml_state in ["Distracted", "Sleepy", "Absent"]) or is_sleepy
+
+        if is_sleepy:
+            if self.distracted_start_time is None:
+                self.distracted_start_time = now
+            elapsed = now - self.distracted_start_time
+            if elapsed < 1.0:
+                self.current_state = "FOCUSED"
+            elif elapsed < 3.0:
+                self.current_state = "SLEEPY"
+            else:
+                self.current_state = "WARNING (SLEEPY)"
+        elif is_raw_distracted:
             if self.distracted_start_time is None:
                 self.distracted_start_time = now
             
             elapsed = now - self.distracted_start_time
             if elapsed < 1.5:
-                self.current_state = "FOCUSED" # Dưới 1.5s chưa phạt
+                self.current_state = "FOCUSED"  # Dưới 1.5s chưa phạt (quay đầu nhẹ, đổi tư thế)
             elif 1.5 <= elapsed < 4.0:
                 self.current_state = "DISTRACTED"
             else:
-                self.current_state = "WARNING" # Trên 4s cảnh báo mạnh
+                self.current_state = "WARNING"  # Trên 4s cảnh báo mạnh
         else:
             self.distracted_start_time = None
             self.current_state = "FOCUSED"
 
-        # Tính Focus Score
-        if face_count == 0:
-            return 0.0, "Absent"
+        # Tính toán điểm số (Focus Score 0 - 100)
+        eye_state = eye_data.get("eye_state", "OPEN")
+        if eye_state == "OPEN":
+            eye_score = 100.0
+        elif eye_state == "CLOSED":
+            eye_score = 10.0
+        else:
+            eye_score = 60.0
 
-        eye_score = 100.0 if eye_data.get("eye_state") == "OPEN" else 0.0
-        head_score = max(0.0, 100.0 - abs(head_yaw) * 2.0)
-        face_score = 100.0 if face_count == 1 else 0.0
+        head_score = max(0.0, 100.0 - abs(head_yaw) * 2.5)
+        face_score = 100.0 if face_count == 1 else 30.0
 
-        score = (head_score * 0.4) + (eye_score * 0.3) + (face_score * 0.3)
+        base_score = (head_score * 0.4) + (eye_score * 0.3) + (face_score * 0.3)
 
-        return round(score, 1), self.current_state
+        # Phạt điểm phù hợp theo trạng thái
+        if "WARNING" in self.current_state:
+            score = min(base_score, 25.0)
+        elif self.current_state == "SLEEPY":
+            score = min(base_score, 40.0)
+        elif self.current_state == "DISTRACTED":
+            score = min(base_score, 55.0)
+        else:
+            score = base_score
+
+        return round(float(score), 1), self.current_state

@@ -1,73 +1,92 @@
+import sys
+import threading
+import time
 import cv2
+
+
 class Camera:
     def __init__(self, camera_index=0, width=640, height=480):
         """
-        Khởi tạo camera.
-
-        camera_index:
-            0 = webcam mặc định
-            1 = camera thứ 2
-            ...
-        width, height:
-            Kích thước frame sau khi resize.
+        Khởi tạo Camera đa luồng (Threaded Zero-Latency Capture).
+        Khắc phục hoàn toàn hiện tượng trễ tích lũy và đơ cam sau một thời gian chạy.
         """
         self.camera_index = camera_index
         self.width = width
         self.height = height
-        self.cap = cv2.VideoCapture(self.camera_index)
+
+        # 1. Khởi tạo VideoCapture: Ưu tiên backend DirectShow trên Windows
+        self.cap = None
+        if sys.platform == "win32":
+            try:
+                self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            except Exception:
+                self.cap = None
+
+        if self.cap is None or not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(self.camera_index)
+
         if not self.cap.isOpened():
             raise RuntimeError(
                 f"Không thể mở camera với index = {self.camera_index}"
             )
+
+        # 2. Cấu hình phần cứng: Buffer size = 1 để chống trễ tích lũy
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
+        # 3. Khởi tạo Thread đọc camera liên tục trong background
+        self.latest_frame = None
+        self.is_running = True
+        self.lock = threading.Lock()
+
+        # Đọc 1 frame mồi trước khi kích hoạt thread
+        ret, frame = self.cap.read()
+        if ret and frame is not None:
+            self.latest_frame = frame
+
+        self.thread = threading.Thread(target=self._capture_worker, daemon=True)
+        self.thread.start()
+
+    def _capture_worker(self):
+        """
+        Thread nền liên tục đọc frame từ phần cứng webcam,
+        đảm bảo OS buffer luôn được xả sạch, chống đơ và lag tuyệt đối.
+        """
+        consecutive_failures = 0
+        while self.is_running and self.cap is not None and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                consecutive_failures = 0
+                with self.lock:
+                    self.latest_frame = frame
+            else:
+                consecutive_failures += 1
+                if consecutive_failures > 30:
+                    # Mất kết nối camera quá lâu
+                    time.sleep(0.05)
+                else:
+                    time.sleep(0.01)
+
+            # Nhường CPU ngắn để tránh chiếm 100% tài nguyên một nhân CPU
+            time.sleep(0.003)
+
     def read(self):
         """
-        Đọc một frame từ webcam.
-
-        Returns:
-            frame nếu đọc thành công.
-            None nếu đọc thất bại (mất kết nối, camera bị rút...).
+        Lấy frame mới nhất hiện có với độ trễ xấp xỉ 0ms.
         """
-        ret, frame = self.cap.read()
-        if not ret:
-            return None
-        return frame
+        with self.lock:
+            if self.latest_frame is None:
+                return None
+            return self.latest_frame.copy()
 
     def resize(self, frame):
-        """
-        Resize frame về kích thước mong muốn.
-        """
         return cv2.resize(frame, (self.width, self.height))
 
     def flip(self, frame):
-        """
-        Lật frame theo chiều ngang.
-
-        flipCode = 1:
-            Lật ngang, tạo hiệu ứng giống gương.
-        """
         return cv2.flip(frame, 1)
 
     def get_frame(self):
-        """
-        Đọc và xử lý một frame hoàn chỉnh.
-
-        Quy trình:
-        Webcam
-           |
-        Read frame
-           |
-        Resize
-           |
-        Flip
-           |
-        Return frame
-
-        Returns:
-            frame đã xử lý, hoặc None nếu đọc thất bại.
-        """
         frame = self.read()
         if frame is None:
             return None
@@ -77,17 +96,15 @@ class Camera:
         return frame
 
     def is_opened(self):
-        """
-        Kiểm tra camera còn đang mở hay không.
-        """
-        return self.cap.isOpened()
+        return self.cap is not None and self.cap.isOpened() and self.is_running
 
     def release(self):
-        """
-        Giải phóng camera.
-        """
+        self.is_running = False
+        if hasattr(self, 'thread') and self.thread.is_alive():
+            self.thread.join(timeout=0.3)
         if self.cap is not None:
             self.cap.release()
+            self.cap = None
 
     def __enter__(self):
         return self

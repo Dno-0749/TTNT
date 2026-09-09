@@ -8,6 +8,15 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 
+import sys
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 def train_and_compare():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_path = os.path.join(base_dir, "data", "dataset.csv")
@@ -25,10 +34,10 @@ def train_and_compare():
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     models = {
-        "Decision Tree": DecisionTreeClassifier(),
+        "Decision Tree": DecisionTreeClassifier(class_weight="balanced", random_state=42),
         "KNN": KNeighborsClassifier(n_neighbors=5),
-        "SVM": SVC(kernel='rbf', probability=True),
-        "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42)
+        "SVM": SVC(kernel="rbf", probability=True, class_weight="balanced", random_state=42),
+        "Random Forest": RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=42)
     }
 
     results = []
