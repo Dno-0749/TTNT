@@ -81,3 +81,4 @@ Trình duyệt sẽ tự động mở địa chỉ http://localhost:8501. Tích 
 
 📊 Kết Quả Huấn Luyện Mô Hình (ML Evaluation)
 Dự án thử nghiệm và so sánh 4 thuật toán Machine Learning (Decision Tree, KNN, SVM, Random Forest). Mô hình Random Forest đạt hiệu năng và độ ổn định cao nhất trên tập dữ liệu kiểm thử.
+# TTNT
