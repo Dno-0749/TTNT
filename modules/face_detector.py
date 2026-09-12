@@ -1,79 +1,140 @@
 import cv2
-import os
 
 
 class FaceDetector:
-    def __init__(self):
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
-        cascade_path_1 = os.path.join(base_dir, "models", "haarcascade_frontalface_default.xml")
-        cascade_path_2 = os.path.join(base_dir, "modules", "models", "haarcascade_frontalface_default.xml")
-
-        if os.path.exists(cascade_path_1):
-            cascade_path = cascade_path_1
-        elif os.path.exists(cascade_path_2):
-            cascade_path = cascade_path_2
-        else:
-            raise FileNotFoundError(f"Không tìm thấy file xml tại {cascade_path_1} hoặc {cascade_path_2}")
-
+    def __init__(
+        self,
+        scale_factor=1.1,
+        min_neighbors=5,
+        min_size=(30, 30)
+    ):
+        """
+        Khởi tạo Face Detector.
+        Sử dụng Haar Cascade có sẵn trong OpenCV.
+        """
+        cascade_path = (
+            cv2.data.haarcascades
+            + "haarcascade_frontalface_default.xml"
+        )
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        if self.face_cascade.empty():
+            raise RuntimeError(
+                "Không thể tải Haar Cascade Face Detector"
+            )
+        self.scale_factor = scale_factor
+        self.min_neighbors = min_neighbors
+        self.min_size = min_size
 
     def detect(self, frame):
+        """
+        Phát hiện tất cả khuôn mặt trong frame.
+
+        Returns:
+            Danh sách các bounding box:
+            [
+                (x, y, width, height),
+                ...
+            ]
+        """
+        if frame is None:
+            return []
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
         faces = self.face_cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+            gray,
+            scaleFactor=self.scale_factor,
+            minNeighbors=self.min_neighbors,
+            minSize=self.min_size
         )
+
         return faces
 
     def count_faces(self, faces):
+        """
+        Đếm số lượng khuôn mặt.
+        """
         return len(faces)
 
     def draw_faces(self, frame, faces):
-        for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        """
+        Vẽ bounding box quanh từng khuôn mặt.
+        """
+        for index, (x, y, w, h) in enumerate(faces):
+            cv2.rectangle(
+                frame,
+                (x, y),
+                (x + w, y + h),
+                (0, 255, 0),
+                2
+            )
+            cv2.putText(
+                frame,
+                f"Face {index + 1}",
+                (x, y - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2
+            )
         return frame
 
     def draw_status(self, frame, faces):
         """
-        Hiển thị trạng thái khuôn mặt.
+        Xử lý và hiển thị cảnh báo trực quan cho 2 trường hợp đặc biệt:
+            - Không phát hiện khuôn mặt nào (face_count == 0)
+            - Phát hiện nhiều hơn 1 khuôn mặt (face_count > 1)
+
+        Trả về frame đã gắn cảnh báo (nếu có).
         """
-        face_count = len(faces)
+        count = self.count_faces(faces)
 
-        if face_count == 0:
-            status = "NO FACE"
-        elif face_count == 1:
-            status = "SINGLE FACE"
-        else:
-            status = "MULTIPLE FACES"
-
-        cv2.putText(
-            frame,
-            f"Faces: {face_count}",
-            (20, 35),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 0),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            f"Status: {status}",
-            (20, 70),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 255),
-            2
-        )
+        if count == 0:
+            cv2.putText(
+                frame,
+                "Khong phat hien khuon mat",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2
+            )
+        elif count > 1:
+            cv2.putText(
+                frame,
+                f"Canh bao: phat hien {count} khuon mat",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 165, 255),
+                2
+            )
 
         return frame
 
     def get_face_data(self, faces):
         """
-        Trả về dữ liệu khuôn mặt.
-        """
-        count = len(faces)
+        Chuẩn hóa dữ liệu khuôn mặt.
 
+        Output:
+        {
+            "face_count": 2,
+            "status": "single_face" | "no_face" | "multiple_faces",
+            "faces": [
+                {"x": 100, "y": 80, "width": 120, "height": 120},
+                ...
+            ]
+        }
+        """
+        face_data = []
+        for (x, y, w, h) in faces:
+            face_data.append({
+                "x": int(x),
+                "y": int(y),
+                "width": int(w),
+                "height": int(h)
+            })
+
+        count = len(face_data)
         if count == 0:
             status = "no_face"
         elif count == 1:
@@ -81,88 +142,41 @@ class FaceDetector:
         else:
             status = "multiple_faces"
 
-        face_list = []
-
-        for (x, y, w, h) in faces:
-            face_list.append({
-                "x": int(x),
-                "y": int(y),
-                "width": int(w),
-                "height": int(h)
-            })
-
         return {
             "face_count": count,
             "status": status,
-            "faces": face_list
+            "faces": face_data
         }
 
     def detect_and_get_data(self, frame):
         """
-        Phát hiện khuôn mặt và trả về dữ liệu.
+        Hàm tiện ích:
+        Frame -> Detect -> Chuẩn hóa dữ liệu
+
+        Returns:
+            face_data (dict)
         """
         faces = self.detect(frame)
-
         return self.get_face_data(faces)
-
-
-# ==============================
-# TEST FACE DETECTOR
-# ==============================
-
 if __name__ == "__main__":
+    from modules.camera import Camera
 
-    print("=" * 50)
-    print("SMARTSTUDY AI - FACE DETECTOR TEST")
-    print("=" * 50)
+    detector = FaceDetector()
 
-    print("OpenCV version:", cv2.__version__)
-
-    try:
-        detector = FaceDetector()
-
-        print("Haar Cascade: OK")
-        print("Face Detector: OK")
-        print()
-
-        camera = cv2.VideoCapture(0)
-
-        if not camera.isOpened():
-            print("Không thể mở camera.")
-            exit()
-
-        print("Camera: OK")
-        print("Đang chạy camera...")
-        print("Nhấn Q để thoát.")
-
+    with Camera(camera_index=0) as cam:
+        print("Nhấn 'q' để thoát...")
         while True:
-
-            ret, frame = camera.read()
-
-            if not ret:
-                print("Không đọc được frame từ camera.")
+            frame = cam.get_frame()
+            if frame is None:
+                print("Không đọc được frame, dừng chương trình.")
                 break
 
             faces = detector.detect(frame)
-
             frame = detector.draw_faces(frame, faces)
             frame = detector.draw_status(frame, faces)
 
-            cv2.imshow(
-                "SMARTSTUDY AI - Face Detection",
-                frame
-            )
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            cv2.imshow("Face Detection Test", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-        camera.release()
-        cv2.destroyAllWindows()
-
-    except Exception as e:
-
-        print()
-        print("=" * 50)
-        print("LOI:")
-        print(str(e))
-        print("=" * 50)
+    cv2.destroyAllWindows()

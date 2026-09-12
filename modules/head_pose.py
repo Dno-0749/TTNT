@@ -1,3 +1,16 @@
+"""
+MODULE HEAD POSE ESTIMATION & EXTRACTION TÍNH NĂNG XAO NHẮNG
+Dự án: Hệ thống AI đánh giá mức độ tập trung của sinh viên
+Thành viên phụ trách: Thành viên 3
+
+Nhiệm vụ:
+1. Nhận dữ liệu hình ảnh (Frame) hoặc danh sách Facial Landmarks.
+2. Trích xuất các điểm mốc 3D (Mũi, Cằm, Mắt, Miệng).
+3. Sử dụng OpenCV solvePnP và Rodrigues transform để ước lượng các góc Euler: Yaw, Pitch, Roll.
+4. Xử lý phân loại hướng nhìn sinh viên: FRONT (Nhìn thẳng), LEFT (Quay trái), RIGHT (Quay phải), UP (Ngẩng đầu), DOWN (Cúi đầu).
+5. Xuất Dictionary đặc trưng phục vụ cho Module 4 (Machine Learning) và Module 5 (Focus Engine & Temporal Analysis).
+"""
+
 import os
 import cv2
 import numpy as np
@@ -178,9 +191,6 @@ class HeadPoseEstimator:
         annotated_frame = frame.copy()
         image_points_2d = None
 
-        raw_landmarks = None
-        face_count = 0
-
         # 1. Thử phát hiện bằng MediaPipe FaceLandmarker Task API
         if self.landmarker is not None:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -188,11 +198,10 @@ class HeadPoseEstimator:
             detection_result = self.landmarker.detect(mp_image)
 
             if detection_result and detection_result.face_landmarks:
-                face_count = len(detection_result.face_landmarks)
-                raw_landmarks = detection_result.face_landmarks[0]
+                landmarks = detection_result.face_landmarks[0]
                 pts = []
                 for idx in self.landmark_indices:
-                    lm = raw_landmarks[idx]
+                    lm = landmarks[idx]
                     cx, cy = int(lm.x * width), int(lm.y * height)
                     pts.append([cx, cy])
                 image_points_2d = np.array(pts, dtype=np.float64)
@@ -202,11 +211,10 @@ class HeadPoseEstimator:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.legacy_face_mesh.process(rgb_frame)
             if results.multi_face_landmarks:
-                face_count = len(results.multi_face_landmarks)
-                raw_landmarks = results.multi_face_landmarks[0].landmark
+                face_landmarks = results.multi_face_landmarks[0]
                 pts = []
                 for idx in self.landmark_indices:
-                    lm = raw_landmarks[idx]
+                    lm = face_landmarks.landmark[idx]
                     cx, cy = int(lm.x * width), int(lm.y * height)
                     pts.append([cx, cy])
                 image_points_2d = np.array(pts, dtype=np.float64)
@@ -216,7 +224,6 @@ class HeadPoseEstimator:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
             if len(faces) > 0:
-                face_count = len(faces)
                 (x, y, w, h) = faces[0]
                 pts = [
                     [x + w * 0.5, y + h * 0.55],   # Mũi
@@ -230,8 +237,6 @@ class HeadPoseEstimator:
 
         default_output = {
             "face_detected": False,
-            "face_count": 0,
-            "raw_landmarks": None,
             "yaw": 0.0,
             "pitch": 0.0,
             "roll": 0.0,
@@ -242,23 +247,14 @@ class HeadPoseEstimator:
         }
 
         if image_points_2d is None:
-            # HUD cảnh báo không thấy khuôn mặt bán trong suốt
-            overlay = annotated_frame.copy()
-            box_w = 320
-            cx = width // 2
-            cv2.rectangle(overlay, (cx - box_w // 2, 20), (cx + box_w // 2, 65), (15, 23, 42), -1)
-            cv2.addWeighted(overlay, 0.75, annotated_frame, 0.25, 0, annotated_frame)
-            cv2.rectangle(annotated_frame, (cx - box_w // 2, 20), (cx + box_w // 2, 65), (0, 100, 255), 1, cv2.LINE_AA)
-            cv2.circle(annotated_frame, (cx - box_w // 2 + 20, 42), 5, (0, 100, 255), -1, cv2.LINE_AA)
             cv2.putText(
                 annotated_frame,
-                "KHONG THAY KHUON MAT",
-                (cx - box_w // 2 + 35, 47),
+                "TRANG THAI: KHONG THAY KHUON MAT",
+                (30, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (255, 255, 255),
-                2,
-                cv2.LINE_AA
+                0.7,
+                (0, 0, 255),
+                2
             )
             return annotated_frame, default_output
 
@@ -271,36 +267,7 @@ class HeadPoseEstimator:
         direction_vi = self.direction_vi_map.get(direction, "KHÔNG XÁC ĐỊNH")
         is_distracted = (direction != "FRONT")
 
-        # Bảng màu công nghệ hiện đại
-        # Emerald Green cho Nhìn thẳng, Amber/Coral Red cho Mất tập trung
-        theme_color = (80, 210, 120) if direction == "FRONT" else (30, 130, 255)
-
-        # 1. Vẽ khung định vị khuôn mặt dạng Reticle góc công nghệ (Sci-Fi Corner Brackets)
-        min_x, min_y = np.min(image_points_2d, axis=0)
-        max_x, max_y = np.max(image_points_2d, axis=0)
-        pad_x = int((max_x - min_x) * 0.28)
-        pad_y = int((max_y - min_y) * 0.28)
-        bx1 = max(10, int(min_x - pad_x))
-        by1 = max(10, int(min_y - pad_y))
-        bx2 = min(width - 10, int(max_x + pad_x))
-        by2 = min(height - 10, int(max_y + pad_y))
-
-        corner_len = min(22, (bx2 - bx1) // 5)
-        bracket_color = theme_color
-        # Góc trên - trái
-        cv2.line(annotated_frame, (bx1, by1), (bx1 + corner_len, by1), bracket_color, 2, cv2.LINE_AA)
-        cv2.line(annotated_frame, (bx1, by1), (bx1, by1 + corner_len), bracket_color, 2, cv2.LINE_AA)
-        # Góc trên - phải
-        cv2.line(annotated_frame, (bx2, by1), (bx2 - corner_len, by1), bracket_color, 2, cv2.LINE_AA)
-        cv2.line(annotated_frame, (bx2, by1), (bx2, by1 + corner_len), bracket_color, 2, cv2.LINE_AA)
-        # Góc dưới - trái
-        cv2.line(annotated_frame, (bx1, by2), (bx1 + corner_len, by2), bracket_color, 2, cv2.LINE_AA)
-        cv2.line(annotated_frame, (bx1, by2), (bx1, by2 - corner_len), bracket_color, 2, cv2.LINE_AA)
-        # Góc dưới - phải
-        cv2.line(annotated_frame, (bx2, by2), (bx2 - corner_len, by2), bracket_color, 2, cv2.LINE_AA)
-        cv2.line(annotated_frame, (bx2, by2), (bx2, by2 - corner_len), bracket_color, 2, cv2.LINE_AA)
-
-        # 2. Vẽ đường vector 3D từ đỉnh mũi
+        # Vẽ đường vector định hướng từ mũi
         nose_2d = tuple(image_points_2d[0].astype(int))
         focal_length = width
         camera_matrix = np.array([
@@ -310,76 +277,62 @@ class HeadPoseEstimator:
         ], dtype=np.float64)
         dist_coeffs = np.zeros((4, 1), dtype=np.float64)
 
-        nose_end_point_3d = np.array([(0.0, 0.0, 480.0)], dtype=np.float64)
+        nose_end_point_3d = np.array([(0.0, 0.0, 500.0)], dtype=np.float64)
         nose_end_point_2d, _ = cv2.projectPoints(
             nose_end_point_3d, rot_vec, trans_vec, camera_matrix, dist_coeffs
         )
         p1 = nose_2d
         p2 = (int(nose_end_point_2d[0][0][0]), int(nose_end_point_2d[0][0][1]))
 
-        cv2.line(annotated_frame, p1, p2, theme_color, 2, cv2.LINE_AA)
-        cv2.circle(annotated_frame, p2, 4, theme_color, -1, cv2.LINE_AA)
+        line_color = (0, 255, 0) if direction == "FRONT" else (0, 0, 255)
+        cv2.line(annotated_frame, p1, p2, line_color, 3)
 
-        # 3. Vẽ điểm mốc tinh tế (Anti-aliased dots)
         for pt in image_points_2d:
-            cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), 2, (255, 230, 0), -1, cv2.LINE_AA)
+            cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), 3, (255, 255, 0), -1)
 
-        # 4. Hiển thị bảng HUD bán trong suốt (Glassmorphic HUD Card)
-        overlay = annotated_frame.copy()
-        hud_w, hud_h = 330, 120
-        cv2.rectangle(overlay, (16, 16), (16 + hud_w, 16 + hud_h), (15, 23, 42), -1)
-        # Tag ONLINE góc phải
-        cv2.rectangle(overlay, (width - 125, 16), (width - 16, 46), (15, 23, 42), -1)
-        cv2.addWeighted(overlay, 0.72, annotated_frame, 0.28, 0, annotated_frame)
+        # Hiển thị bảng điều khiển thông số
+        cv2.rectangle(annotated_frame, (20, 20), (460, 160), (0, 0, 0), -1)
+        cv2.rectangle(annotated_frame, (20, 20), (460, 160), line_color, 2)
 
-        # Viền HUD thanh mảnh
-        cv2.rectangle(annotated_frame, (16, 16), (16 + hud_w, 16 + hud_h), theme_color, 1, cv2.LINE_AA)
-        cv2.rectangle(annotated_frame, (width - 125, 16), (width - 16, 46), (70, 85, 105), 1, cv2.LINE_AA)
-
-        # Status Tag ONLINE
-        cv2.circle(annotated_frame, (width - 110, 31), 4, (80, 220, 120), -1, cv2.LINE_AA)
-        cv2.putText(annotated_frame, "AI LIVE", (width - 98, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 240, 210), 1, cv2.LINE_AA)
-
-        # Nội dung bên trong HUD
-        cv2.circle(annotated_frame, (32, 38), 5, theme_color, -1, cv2.LINE_AA)
         cv2.putText(
             annotated_frame,
-            f"{direction_vi} ({direction})",
-            (46, 43),
+            f"HUONG NHIN: {direction_vi} ({direction})",
+            (35, 55),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            line_color,
+            2
+        )
+        cv2.putText(
+            annotated_frame,
+            f"Goc Yaw (Xoay Trai/Phai): {yaw:.1f} deg",
+            (35, 85),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
-            theme_color,
-            2,
-            cv2.LINE_AA
-        )
-
-        cv2.line(annotated_frame, (26, 54), (16 + hud_w - 12, 54), (55, 68, 88), 1, cv2.LINE_AA)
-
-        cv2.putText(
-            annotated_frame,
-            f"Yaw (Ngang):   {yaw:+.1f} deg",
-            (28, 77),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.46,
-            (235, 240, 245),
-            1,
-            cv2.LINE_AA
+            (255, 255, 255),
+            1
         )
         cv2.putText(
             annotated_frame,
-            f"Pitch (Doc):   {pitch:+.1f} deg | Roll: {roll:+.1f} deg",
-            (28, 102),
+            f"Goc Pitch (Gat/Ngang):   {pitch:.1f} deg",
+            (35, 110),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.44,
-            (180, 195, 215),
-            1,
-            cv2.LINE_AA
+            0.55,
+            (255, 255, 255),
+            1
+        )
+        cv2.putText(
+            annotated_frame,
+            f"Goc Roll (Nghieng dau):   {roll:.1f} deg",
+            (35, 135),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            1
         )
 
         feature_dict = {
             "face_detected": True,
-            "face_count": face_count,
-            "raw_landmarks": raw_landmarks,
             "yaw": round(float(yaw), 2),
             "pitch": round(float(pitch), 2),
             "roll": round(float(roll), 2),
