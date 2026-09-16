@@ -1,0 +1,6 @@
+opencv-contrib-python==4.12.0.88
+numpy
+mediapipe==0.10.32
+joblib
+pandas
+streamlit
