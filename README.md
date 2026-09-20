@@ -58,5 +58,3 @@ python -m unittest discover -s tests -v
 Các trường hợp cần kiểm thử camera thực tế: mắt mở, mắt nhắm, chớp mắt, nhắm mắt
 lâu, ánh sáng yếu/thay đổi và người đeo kính. Với ánh sáng hoặc kính làm EAR dao
 động, cần hiệu chỉnh `ear_threshold` theo dữ liệu thực tế thay vì dùng cứng `0.21`.
-
-
