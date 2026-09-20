@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+
+# Bỏ qua các file model lớn (có thể tải lại tự động)
+*.tflite
+*.pt
+*.pkl
+
+# Bỏ qua dữ liệu tạm
+*.csv
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Updated by minhtnhm
